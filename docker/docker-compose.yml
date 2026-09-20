@@ -1,0 +1,79 @@
+name: shortlink
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: shortlink-mysql
+    environment:
+      # The app writes LocalDateTime.now(UTC) into valid_until and compares it against the server's
+      # CURRENT_TIMESTAMP defaults; a non-UTC session timezone would silently shift every expiry check.
+      TZ: UTC
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: shortlink
+      MYSQL_USER: shortlink
+      MYSQL_PASSWORD: shortlink
+    ports:
+      # 3306 is taken by a MySQL already running on this host.
+      - "13306:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    # RedisBloom ships inside Redis Open Source since Redis 8 — no redis-stack-server needed.
+    image: redis:8.10.1
+    container_name: shortlink-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  namesrv:
+    image: apache/rocketmq:5.3.1
+    container_name: shortlink-namesrv
+    ports:
+      - "9876:9876"
+    environment:
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn256m"
+    command: ["sh", "mqnamesrv"]
+
+  broker:
+    image: apache/rocketmq:5.3.1
+    container_name: shortlink-broker
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    environment:
+      # Defaults assume a dedicated broker host and will not start inside a small dev VM.
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn512m"
+      NAMESRV_ADDR: "namesrv:9876"
+    command: ["sh", "mqbroker", "-c", "/home/rocketmq/conf/broker.conf"]
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
+      # A named volume here is created root-owned while the image runs as uid 3000 (rocketmq);
+      # the broker then cannot write its store and dies before it can report a useful error.
+      # A bind mount is permissively writable under Docker Desktop on Windows.
+      - ./rocketmq/store:/home/rocketmq/store
+    # The broker exits if the namesrv is not listening yet; restarting it is simpler and more
+    # reliable than probing, since the image has no port-check tooling guaranteed present.
+    restart: unless-stopped
+    depends_on:
+      - namesrv
+
+volumes:
+  mysql-data:
+  redis-data:

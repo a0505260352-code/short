@@ -1,0 +1,92 @@
+spring:
+  application:
+    name: shortlink
+
+  datasource:
+    url: jdbc:mysql://127.0.0.1:13306/shortlink?useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&serverTimezone=UTC
+    username: shortlink
+    password: shortlink
+    hikari:
+      maximum-pool-size: 16
+      pool-name: shortlink-pool
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 2s
+
+  cloud:
+    function:
+      # Every name here must be a bean that exists: a definition pointing at a missing function aborts
+      # context startup. Expiry needs no binding of its own: see ExpirySweepTask.
+      definition: clickConsumer
+    stream:
+      bindings:
+        click-out-0:
+          destination: short-link-click
+          content-type: application/json
+        clickConsumer-in-0:
+          destination: short-link-click
+          content-type: application/json
+          consumer:
+            group: shortlink-click-group
+      rocketmq:
+        binder:
+          name-server: 127.0.0.1:9876
+        bindings:
+          click-out-0:
+            producer:
+              # One-way: a synchronous send would wait 3s and retry twice before the browser got its
+              # redirect, which is the coupling between statistics and availability this service refuses.
+              send-type: OneWay
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+shortlink:
+  base-url: http://localhost:8080
+  code:
+    max-attempts: 8
+  bloom:
+    key: "bf:codes"
+    false-positive-rate: 0.01
+    expected-capacity: 5000000
+    expansion: 2
+  cache:
+    max-ttl-seconds: 86400
+    negative-ttl-seconds: 120
+  click:
+    queue-capacity: 20000
+    max-batch-rows: 500
+    flush-interval-ms: 200
+    offer-timeout-ms: 10000
+  partition:
+    horizon-days: 7
+    retention-days: 180
+  expiry:
+    # Only sweep-batch-size binds to ExpiryProperties; sweep-interval is read by the @Scheduled slot.
+    sweep-batch-size: 1000
+    sweep-interval: 10m
+  ratelimit:
+    create-per-ip-limit: 30
+    create-per-ip-window-seconds: 60
+    create-global-limit: 600
+    create-global-window-seconds: 60
+    redirect-per-ip-limit: 600
+    redirect-per-ip-window-seconds: 60
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    com.example.shortlink: INFO

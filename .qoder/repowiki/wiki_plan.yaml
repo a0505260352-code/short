@@ -1,0 +1,90 @@
+version: 1
+
+# Pre-flight plan for the wiki / knowledge build. Baseline facts that were measured, not guessed:
+# every note below names something a reader cannot recover from the code alone, or that a doc
+# generator would otherwise "helpfully" contradict. Canonical prose lives in docs/adr/.
+
+repowiki:
+  template: architecture
+  notes:
+    - text: >-
+        技术栈基线：Spring Boot 3.5.16 + Spring Cloud 2025.0.3 + Spring Cloud Alibaba 2025.0.0.0
+        （`spring-cloud-starter-stream-rocketmq`），MyBatis-Plus 3.5.17（boot3 starter）、Flyway 11.7.2
+        （MySQL 方言独立成 `flyway-mysql`）、Testcontainers 1.21.4。Boot 3.5 已过 OSS EOL 是**知悉后被明确
+        接受的取舍**，不要把它写成缺陷，也不要建议升到 Boot 4 或改用 `rocketmq-spring`——决策依据见
+        docs/adr/ADR-001-tech-stack.md。
+    - text: >-
+        MQ 编程模型是 Spring Cloud Stream 的函数式绑定（`Consumer` bean + `spring.cloud.stream.bindings.*`
+        + `StreamBridge`）。本仓库不存在、也不应出现 `RocketMQTemplate` 与 `@RocketMQMessageListener`。
+        bean 名即 binding 名前缀，`spring.cloud.function.definition` 指向不存在的函数会导致上下文启动失败。
+    - text: >-
+        根 POM 显式钉 `fastjson2 2.0.58` 是必需的：`rocketmq-common` 传递 2.0.43 而 SCA binder 传递
+        `fastjson2-extension 2.0.58`，Maven nearest-wins 会让新版 extension 跑在旧 core 上。不要按
+        「未使用依赖」清理它。
+    - text: >-
+        基础包名是 `com.example.shortlink`，因为 `short` 是 Java 关键字、无法作为包段。不要按 README 里的
+        仓库名 `short` 去描述包结构，也不要「修正」这个命名。
+    - text: >-
+        两张表的约束都是承载语义的：`t_short_link.code` 必须 `COLLATE ascii_bin`（表默认
+        `utf8mb4_0900_ai_ci` 大小写不敏感，会让 `a1B2c3` 与 `A1B2C3` 相等，静默破坏唯一索引且可能读错行）；
+        `t_link_click_log` 是 RANGE 分区表，MySQL 要求每个唯一键包含全部分区列，因此
+        `PRIMARY KEY(id, click_time)`、`UNIQUE KEY uk_event(event_id, click_time)` 不是设计随意。
+    - text: >-
+        跳转永远是 302 而非 301：浏览器会缓存永久重定向，第一次之后的点击就丢了。同理，点击统计被刻意设计成
+        不可能拖垮跳转——producer 钉 `send-type: OneWay`（默认 Sync 在 broker 不可用时会让每次跳转阻塞最多
+        9 秒），发送失败只记日志。
+    - text: >-
+        短码规则：`Base62(MurmurHash3.hash32x86(url))` 定长 6 位、左侧补 `0`；冲突时把随机 UUID 追加到
+        **哈希输入**（不是产出码）后整条流水线重跑，`uk_code` 上的 `DuplicateKeyException` 是第二个触发器。
+        布隆过滤器只是加速器，唯一索引才是仲裁者。黄金值 `"https://example.com"` → `3fjKsi`。
+    - text: >-
+        v1 **不做鉴权**，这是范围决定而非遗漏：`t_short_link.owner_id` 列与 `RateLimitKeyResolver` 接口
+        就是为鉴权预留的接缝。描述它们时应写成预留边界，不要写成待办缺陷。
+    - text: >-
+        两处反直觉的实现选择必须按原因描述，否则读者会「修好」它们：① 消费端反压用阻塞 `offer(timeout)`
+        而不是抛异常——这条 binder 会把监听器包进 `RetryTemplate`，耗尽后异常被吞、消息仍被 ack，抛异常等于丢数据；
+        ② 过期只有 10 分钟 `@Scheduled` 清扫，没有延迟消息阶梯——跳转路径从不单独信任 `status`
+        （`isLive()` 按 `valid_until` 判定，缓存 TTL 钳到同一时刻），清扫只让统计接口的字段变准。
+    - text: >-
+        限流策略是路由属性而非全局属性：Redis 不可达时**创建 fail-closed（503）**、**跳转 fail-open（放行）**，
+        `RateLimitService` 本身不含任何故障策略。三个桶 `create-ip`/`create-global`/`redirect-ip` 串联时
+        顺序决定口径（当前全局桶计的是通过量而非尝试量）。另记一个实测坑：`StringRedisTemplate` 执行 Lua 时
+        多字段回复会按 value 序列化器变成 `String`，直接 `(Number)` 强转会让每个请求 500。
+    - text: >-
+        构建与运行环境：Maven Wrapper 是 only-script 型（`mvnw`/`mvnw.cmd`/`.mvn/wrapper/maven-wrapper.properties`
+        三文件，发行版钉 Maven 3.9.16），**没有全局 Maven 也不需安装**。compose 里 MySQL 映射到宿主 13306
+        （3306 已被占用），broker 的 store 必须用 bind mount 且 `brokerIP1 = 127.0.0.1`。Redis 用
+        `redis:8.10.1`，布隆命令自 Redis 8 起并入开源版，不需要 redis-stack-server。
+    - text: >-
+        测试分两层：仅需 Docker 的 42 个（Testcontainers 起真 MySQL/Redis）随时可跑；端到端点击链路
+        （`ClickPipelineTest`）需要真 broker，用 `SHORTLINK_MQ_TEST=true` 显式开启。写文档时不要把两者
+        混为「全量测试都要 Docker + broker」。
+
+knowledgecard:
+  notes:
+    - text: >-
+        模块边界按包划分且各自有独立理由，不要合并：`codec`（纯函数，无 Spring）、`bloom`（Redis 布隆，
+        走 `EVAL`+`redis.call('BF.*')`，因为 Lettuce 6.6 的 `CommandType` 里没有任何 `BF_*` 常量）、
+        `core`（发码环 + 服务 + 缓存 + URL/vanity 策略）、`persistence`、`mq`、`maintenance`、
+        `ratelimit`、`web`、`config`。尤其不要把 `ratelimit` 折进 `web`：拦截器只是它的挂载点。
+    - text: >-
+        `LinkClickLogMapper` 刻意不继承 `BaseMapper`，写入用带 `<foreach>` 的多行 `INSERT IGNORE`，
+        并且**按 code 分组**执行：`INSERT IGNORE` 对重复行返回 0，而 MySQL 每条语句只给一个总
+        affected-rows，不分组就无法区分重投的重复事件与新点击。`client_ip` 是 `VARBINARY(16)`，
+        经 `INET6_ATON/INET6_NTOA` 读写。
+    - text: >-
+        `ClickBatchWriter` 的丢事件窗口是有界的、被接受的（最多 `queue-capacity` 条，不是一批），
+        刷盘线程是 daemon + `@PreDestroy` join。把它描述成「可靠投递」是错的，它是尽力而为的统计链路。
+    - text: >-
+        分区维护在 `PartitionMaintenanceTask`：启动与每日 02:30 UTC 各跑一次，`REORGANIZE PARTITION pmax`
+        预建 7 天，超 180 天 `DROP PARTITION`；异常只记日志不致命（多实例会抢同一条 DDL，输家下次补上）。
+        日分区名定宽，保留期用字典序比较日期字符串即可。
+    - text: >-
+        基线以 `docs/adr/ADR-001-tech-stack.md` 与 `docs/adr/ADR-002-code-generation.md` 为准；两者与本
+        卡冲突时以 ADR 为准。`spike/` 包与 `application-mq-spike.yml` 是阶段 0 的一次性验证脚手架，结论
+        进 ADR-001 后已删除，不要重新引入或描述为现存模块。
+    - text: >-
+        配置项与代码必须同步演进这件事在本仓库是硬约束：`spring.cloud.function.definition`、
+        `spring.cloud.stream.bindings.*` 与 `@ConfigurationProperties` 前缀（record 构造绑定会忽略未知属性，
+        写错名字不报错只静默退回默认值，例如 producer 的 `send-type`）。描述配置时说明其失效模式，
+        不要只列键值。

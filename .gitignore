@@ -1,23 +1,29 @@
-# 依赖与构建产物
-node_modules/
-dist/
-build/
-out/
-*.min.js.map
+# Build output
+target/
+!.mvn/wrapper/maven-wrapper.jar
 
-# 环境变量与密钥
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & env
+*.log
+logs/
+.scratch/
 .env
 .env.*
 !.env.example
 
-# 日志
-*.log
-npm-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# 编辑器与系统
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Docker bind-mounted state
+docker/rocketmq/logs/
+docker/rocketmq/store/

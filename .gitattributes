@@ -1,0 +1,4 @@
+# The POSIX wrapper script must keep LF endings or /bin/sh fails on it.
+mvnw text eol=lf
+mvnw.cmd text eol=crlf
+*.sh text eol=lf
