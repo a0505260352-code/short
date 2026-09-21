@@ -45,6 +45,12 @@ spring:
               # redirect, which is the coupling between statistics and availability this service refuses.
               send-type: OneWay
 
+server:
+  # Loopback-only to match the dev stack's published ports: on a shared network the machine should not
+  # be serving create/redirect endpoints to strangers just because someone ran `mvnw spring-boot:run`.
+  # Drop this (or set 0.0.0.0) when the service is deployed behind a real proxy.
+  address: 127.0.0.1
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

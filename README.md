@@ -10,8 +10,8 @@
 ```bash
 git clone https://github.com/a0505260352-code/short.git
 cd short
-docker compose -f docker/docker-compose.yml up -d   # MySQL 映射到宿主 13306（3306 已被占用）
-./mvnw spring-boot:run                              # 应用监听 8080
+docker compose -f docker/docker-compose.yml up -d   # MySQL 映射到宿主 13306（3306 已被占用）；六个端口全部只绑 127.0.0.1，局域网不可达
+./mvnw spring-boot:run                              # 应用监听 127.0.0.1:8080（`server.address`），换机器访问需自行改回 0.0.0.0
 ```
 
 ```bash
